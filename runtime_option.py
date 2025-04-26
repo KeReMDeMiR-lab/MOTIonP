@@ -68,6 +68,13 @@ def runtime_option():
     parser.add_argument("--use-shared-aux-head", type=str)
     parser.add_argument("--use-focal-loss", type=str)
 
+    # Motion-related parameters
+    parser.add_argument("--motion-dim", type=int, help="Dimension of motion features")
+    parser.add_argument("--motion-weight", type=float, help="Weight for motion scores in assignment")
+    parser.add_argument("--motion-loss-weight", type=float, help="Weight for motion prediction loss")
+    parser.add_argument("--motion-l1-weight", type=float, help="Weight for L1 loss in motion prediction")
+    parser.add_argument("--motion-giou-weight", type=float, help="Weight for GIoU loss in motion prediction")
+
     # Model settings:
     parser.add_argument("--ffn-dim-ratio", type=int)
     parser.add_argument("--rel-pe-length", type=int)

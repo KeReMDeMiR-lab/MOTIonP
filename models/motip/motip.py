@@ -1,5 +1,6 @@
 # Copyright (c) Ruopeng Gao. All Rights Reserved.
 
+import torch
 import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
@@ -12,6 +13,7 @@ class MOTIP(nn.Module):
             only_detr: bool,
             trajectory_modeling: nn.Module,
             id_decoder: nn.Module,
+            motion_weight: float = 0.5,
     ):
         super().__init__()
         self.detr = detr
@@ -19,6 +21,7 @@ class MOTIP(nn.Module):
         self.only_detr = only_detr
         self.trajectory_modeling = trajectory_modeling
         self.id_decoder = id_decoder
+        self.motion_weight = motion_weight
 
         if self.id_decoder is not None:
             self.num_id_vocabulary = self.id_decoder.num_id_vocabulary

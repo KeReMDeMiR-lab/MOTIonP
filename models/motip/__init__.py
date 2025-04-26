@@ -48,13 +48,15 @@ def build(config: dict):
             raise NotImplementedError(f"DETR framework {config['DETR_FRAMEWORK']} is not supported.")
 
     # Build each component:
-    # 1. trajectory modeling (currently, only FFNs are used):
+    # 1. trajectory modeling (with motion features):
     _trajectory_modeling = TrajectoryModeling(
         detr_dim=config["DETR_HIDDEN_DIM"],
         ffn_dim_ratio=config["FFN_DIM_RATIO"],
         feature_dim=config["FEATURE_DIM"],
+        motion_dim=config.get("MOTION_DIM", 32),
     ) if config["ONLY_DETR"] is False else None
-    # 2. ID decoder:
+    
+    # 2. ID decoder with motion prediction:
     _id_decoder = IDDecoder(
         feature_dim=config["FEATURE_DIM"],
         id_dim=config["ID_DIM"],
@@ -65,15 +67,17 @@ def build(config: dict):
         rel_pe_length=config["REL_PE_LENGTH"],
         use_aux_loss=config["USE_AUX_LOSS"],
         use_shared_aux_head=config["USE_SHARED_AUX_HEAD"],
+        motion_weight=config.get("MOTION_WEIGHT", 0.5),
     ) if config["ONLY_DETR"] is False else None
 
-    # Construct MOTIP model:
+    # Construct MOTIonP model:
     motip_model = MOTIP(
         detr=detr,
         detr_framework=detr_framework,
         only_detr=config["ONLY_DETR"],
         trajectory_modeling=_trajectory_modeling,
         id_decoder=_id_decoder,
+        motion_weight=config.get("MOTION_WEIGHT", 0.5),
     )
 
     return motip_model, detr_criterion

@@ -3,11 +3,13 @@
 import torch
 import einops
 import torch.nn as nn
+import torch.nn.functional as F
 from typing import Tuple
 from torch.utils.checkpoint import checkpoint
 
 from models.misc import _get_clones, label_to_one_hot
 from models.ffn import FFN
+from utils.box_ops import generalized_box_iou, box_cxcywh_to_xyxy
 
 
 class IDDecoder(nn.Module):
@@ -22,6 +24,7 @@ class IDDecoder(nn.Module):
             rel_pe_length: int,
             use_aux_loss: bool,
             use_shared_aux_head: bool,
+            motion_weight: float = 0.5,
     ):
         super().__init__()
 
@@ -33,6 +36,7 @@ class IDDecoder(nn.Module):
         self.n_heads = (self.feature_dim + self.id_dim) // self.head_dim
         self.num_id_vocabulary = num_id_vocabulary
         self.rel_pe_length = rel_pe_length
+        self.motion_weight = motion_weight
 
         self.use_aux_loss = use_aux_loss
         self.use_shared_aux_head = use_shared_aux_head
@@ -85,6 +89,13 @@ class IDDecoder(nn.Module):
         self.cross_attn_norm_layers = _get_clones(cross_attn_norm, self.num_layers)
         self.ffn_layers = _get_clones(ffn, self.num_layers)
         self.ffn_norm_layers = _get_clones(ffn_norm, self.num_layers)
+        
+        # Motion prediction components
+        self.position_predictor = nn.Sequential(
+            nn.Linear(self.feature_dim + self.id_dim, 256),
+            nn.GELU(),
+            nn.Linear(256, 4)  # Predict normalized box coordinates (cx, cy, w, h)
+        )
 
         # Init parameters:
         for n, p in self.named_parameters():
@@ -96,6 +107,8 @@ class IDDecoder(nn.Module):
     def forward(self, seq_info, use_decoder_checkpoint):
         trajectory_features = seq_info["trajectory_features"]
         unknown_features = seq_info["unknown_features"]
+        trajectory_boxes = seq_info["trajectory_boxes"]
+        unknown_boxes = seq_info.get("unknown_boxes", None)
         trajectory_id_labels = seq_info["trajectory_id_labels"]
         unknown_id_labels = seq_info["unknown_id_labels"] if "unknown_id_labels" in seq_info else None
         trajectory_times = seq_info["trajectory_times"]
@@ -145,6 +158,7 @@ class IDDecoder(nn.Module):
         all_unknown_id_logits = None
         all_unknown_id_labels = None
         all_unknown_id_masks = None
+        all_predicted_boxes = None
 
         for layer in range(self.num_layers):
             # Predict ID logits:
@@ -171,19 +185,27 @@ class IDDecoder(nn.Module):
             _unknown_id_logits = self.embed_to_word_layers[layer](unknown_embeds[..., -self.id_dim:])
             _unknown_id_masks = unknown_masks.clone()
             _unknown_id_labels = None if not self.training else unknown_id_labels
+            
+            # Predict next position for motion estimation
+            _predicted_boxes = self.position_predictor(unknown_embeds)
+            _predicted_boxes = einops.rearrange(_predicted_boxes, "(b g t) n c -> b g t n c", 
+                                              b=_curr_B, g=_curr_G, t=_curr_T)
+            
             if all_unknown_id_logits is None:
                 all_unknown_id_logits = _unknown_id_logits
                 all_unknown_id_labels = _unknown_id_labels
                 all_unknown_id_masks = _unknown_id_masks
+                all_predicted_boxes = _predicted_boxes
             else:
                 all_unknown_id_logits = torch.cat([all_unknown_id_logits, _unknown_id_logits], dim=0)
                 all_unknown_id_labels = torch.cat([all_unknown_id_labels, _unknown_id_labels], dim=0) if _unknown_id_labels is not None else None
                 all_unknown_id_masks = torch.cat([all_unknown_id_masks, _unknown_id_masks], dim=0)
+                all_predicted_boxes = torch.cat([all_predicted_boxes, _predicted_boxes], dim=0)
 
         if self.training and self.use_aux_loss:
-            return all_unknown_id_logits, all_unknown_id_labels, all_unknown_id_masks
+            return all_unknown_id_logits, all_unknown_id_labels, all_unknown_id_masks, all_predicted_boxes
         else:
-            return _unknown_id_logits, _unknown_id_labels, _unknown_id_masks
+            return _unknown_id_logits, _unknown_id_labels, _unknown_id_masks, _predicted_boxes
 
     def _forward_a_layer(
             self,
