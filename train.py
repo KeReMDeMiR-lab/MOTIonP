@@ -11,7 +11,9 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import MultiStepLR
 from collections import defaultdict
 from torchvision.transforms import v2
-from typing import Any, Generator, List
+from typing import Any, Generator, List, Dict, Optional
+import yaml
+from tqdm import tqdm
 
 from models.motip import build as build_motip
 from models.motip.id_criterion import build as build_id_criterion
@@ -27,6 +29,10 @@ from models.misc import load_detr_pretrain, save_checkpoint, load_checkpoint
 from models.misc import get_model
 from utils.nested_tensor import NestedTensor
 from submit_and_evaluate import submit_and_evaluate_one_model
+from models.motip import MOTIP
+from models.deformable_detr import build_deformable_detr
+from utils.misc import nested_tensor_from_tensor_list
+from utils.motion_utils import compute_motion_targets
 
 
 def train_engine(config: dict):
@@ -708,6 +714,83 @@ def prepare_for_motip(detr_outputs, annotations, detr_indices):
         "unknown_boxes": unknown_boxes,
         "unknown_features": unknown_features,
     }
+
+
+def build_model(cfg: Dict) -> nn.Module:
+    """Build MOTIP model with motion prediction"""
+    # Build Deformable DETR backbone
+    detr = build_deformable_detr(cfg)
+    
+    # Build MOTIP with motion prediction
+    model = MOTIP(
+        hidden_dim=cfg['hidden_dim'],
+        num_queries=cfg['num_queries'],
+        num_classes=cfg['num_classes'],
+        motion_dim=cfg.get('motion_dim', 32),
+        ffn_dim_ratio=cfg.get('ffn_dim_ratio', 4),
+        motion_weight=cfg.get('motion_weight', 0.35)
+    )
+    
+    return model
+
+
+def prepare_targets(targets: List[Dict], device: torch.device) -> List[Dict]:
+    """Prepare targets with motion information"""
+    prepared_targets = []
+    for target in targets:
+        # Compute motion targets
+        motion = compute_motion_targets(target['boxes'])
+        
+        prepared_target = {
+            'boxes': target['boxes'].to(device),
+            'labels': target['labels'].to(device),
+            'ids': target['ids'].to(device),
+            'motion': motion.to(device)
+        }
+        prepared_targets.append(prepared_target)
+    
+    return prepared_targets
+
+
+def train_one_epoch(model: nn.Module,
+                   criterion: nn.Module,
+                   data_loader: DataLoader,
+                   optimizer: torch.optim.Optimizer,
+                   device: torch.device,
+                   epoch: int,
+                   max_norm: float = 0.1) -> Dict[str, float]:
+    """Train one epoch with motion prediction"""
+    model.train()
+    criterion.train()
+    
+    metric_logger = MetricLogger(delimiter="  ")
+    metric_logger.add_meter('lr', SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    header = f'Epoch: [{epoch}]'
+    
+    for samples, targets in metric_logger.log_every(data_loader, 10, header):
+        samples = samples.to(device)
+        targets = prepare_targets(targets, device)
+        
+        # Forward pass
+        outputs = model(samples)
+        
+        # Compute loss
+        loss_dict = criterion(outputs, targets)
+        weight_dict = criterion.weight_dict
+        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
+        
+        # Backward pass
+        optimizer.zero_grad()
+        losses.backward()
+        if max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+        optimizer.step()
+        
+        # Log metrics
+        metric_logger.update(loss=losses.item(), **loss_dict)
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+    
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
 if __name__ == '__main__':

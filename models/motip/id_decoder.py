@@ -24,7 +24,7 @@ class IDDecoder(nn.Module):
             rel_pe_length: int,
             use_aux_loss: bool,
             use_shared_aux_head: bool,
-            motion_weight: float = 0.5,
+            motion_weight: float = 0.35,
     ):
         super().__init__()
 

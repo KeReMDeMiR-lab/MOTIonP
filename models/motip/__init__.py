@@ -67,7 +67,7 @@ def build(config: dict):
         rel_pe_length=config["REL_PE_LENGTH"],
         use_aux_loss=config["USE_AUX_LOSS"],
         use_shared_aux_head=config["USE_SHARED_AUX_HEAD"],
-        motion_weight=config.get("MOTION_WEIGHT", 0.5),
+        motion_weight=config.get("MOTION_WEIGHT", 0.35),
     ) if config["ONLY_DETR"] is False else None
 
     # Construct MOTIonP model:
@@ -77,7 +77,7 @@ def build(config: dict):
         only_detr=config["ONLY_DETR"],
         trajectory_modeling=_trajectory_modeling,
         id_decoder=_id_decoder,
-        motion_weight=config.get("MOTION_WEIGHT", 0.5),
+        motion_weight=config.get("MOTION_WEIGHT", 0.35),
     )
 
     return motip_model, detr_criterion
