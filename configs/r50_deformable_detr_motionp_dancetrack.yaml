@@ -2,7 +2,7 @@ SUPER_CONFIG_PATH: ./configs/r50_deformable_detr_motip_dancetrack.yaml
 
 # Motion-specific settings
 MOTION_DIM: 32
-MOTION_WEIGHT: 0.5
+MOTION_WEIGHT: 0.35
 ASSIGNMENT_PROTOCOL: motion-guided
 
 # Training settings for motion prediction
