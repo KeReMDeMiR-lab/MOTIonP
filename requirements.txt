@@ -1,0 +1,19 @@
+# Core dependencies
+torch==2.4.0
+torchvision==0.19.0
+torchaudio==2.4.0
+
+# Additional dependencies
+pyyaml
+tqdm
+matplotlib
+scipy
+pandas
+wandb
+accelerate
+einops
+
+# Note: This project requires:
+# - Python 3.12 or higher
+# - PyTorch 2.4.0 or higher
+# - CUDA 12.1 (for GPU support) 
